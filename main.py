@@ -9,6 +9,7 @@ import pandas as pd
 import json
 import io
 from contextlib import contextmanager
+import uvicorn  # Importando o Uvicorn
 
 # Configuração do FastAPI
 app = FastAPI()
@@ -117,3 +118,8 @@ async def upload_file(file: UploadFile = File(...), client: MongoClient = Depend
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao processar o upload: {str(e)}")
+
+
+# Rodar o servidor com Uvicorn diretamente
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
