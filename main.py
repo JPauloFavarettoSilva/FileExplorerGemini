@@ -95,6 +95,8 @@ async def upload_file(file: UploadFile = File(...), client: MongoClient = Depend
         # Extrair metadados
         metadados = await extract_metadata(file)
 
+        await file.seek(0)
+
         # Processar o conteúdo do arquivo (amostra)
         amostra_conteudo = await process_file(file)
 
