@@ -1,12 +1,14 @@
-from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi import FastAPI, HTTPException, File, UploadFile, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
+from pymongo.collection import Collection
 from datetime import datetime
 import google.generativeai as genai
 import xml.etree.ElementTree as ET
 import pandas as pd
 import json
 import io
+from contextlib import contextmanager
 
 # Configuração do FastAPI
 app = FastAPI()
@@ -18,10 +20,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Conexão com o MongoDB
-client = MongoClient("mongodb://localhost:27017/")
-db = client["meu_banco"]
-collection = db["arquivos"]
+# Criação do gerenciador de contexto para o MongoDB
+@contextmanager
+def get_mongo_client():
+    client = MongoClient("mongodb://localhost:27017/")
+    try:
+        yield client
+    finally:
+        client.close()  # Garante que a conexão seja fechada após o uso
+
+# Função para obter a coleção
+def get_collection(client: MongoClient) -> Collection:
+    return client["APIGemini"]["arquivos"]
 
 # Configuração da API Gemini
 genai.configure(api_key="SUA_CHAVE_API")
@@ -75,7 +85,7 @@ async def send_to_gemini(metadados, amostra):
 
 # Endpoint para upload de arquivo
 @app.post("/upload-file/")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), client: MongoClient = Depends(get_mongo_client)):
     try:
         # Verificar o tipo do arquivo
         if not file.content_type in ['text/xml', 'text/csv', 'application/json', 'text/plain']:
@@ -95,6 +105,9 @@ async def upload_file(file: UploadFile = File(...)):
             "metadados": metadados,
             "resumoGemini": resumo_gemini
         }
+
+        # Obter a coleção do MongoDB usando a dependência
+        collection = get_collection(client)
 
         # Salvar no MongoDB
         collection.insert_one(resposta)
