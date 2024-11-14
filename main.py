@@ -1,3 +1,4 @@
+from typing import Generator
 from fastapi import FastAPI, HTTPException, File, UploadFile, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
@@ -23,16 +24,26 @@ app.add_middleware(
 
 # Criação do gerenciador de contexto para o MongoDB
 @contextmanager
-def get_mongo_client():
-    client = MongoClient("mongodb://localhost:27017/")
+def get_mongo_client(uri: str = "mongodb://localhost:27017/") -> Generator[MongoClient, None, None]:
+    client = MongoClient(uri)
     try:
         yield client
+    except Exception as e:
+        print(f"Erro ao conectar com o MongoDB: {e}")
+        raise
     finally:
         client.close()  # Garante que a conexão seja fechada após o uso
 
 # Função para obter a coleção
-def get_collection(client: MongoClient) -> Collection:
-    return client["APIGemini"]["arquivos"]
+def get_collection(client: MongoClient, db_name: str, collection_name: str) -> Collection:
+    return client[db_name][collection_name]
+
+# Exemplo de uso
+with get_mongo_client() as client:
+    collection = get_collection(client, "APIGemini", "arquivos")
+    # Agora você pode usar a coleção, por exemplo:
+    documento = collection.find_one()
+    print(documento)
 
 # Configuração da API Gemini
 genai.configure(api_key="SUA_CHAVE_API")
@@ -59,17 +70,17 @@ async def process_file(file: UploadFile):
 
     if formato == "xml":
         root = ET.fromstring(content)
-        conteudo = ET.tostring(root, encoding='utf-8').decode('utf-8')[:500]  # Amostra de 500 caracteres
+        conteudo = ET.tostring(root, encoding='utf-8').decode('utf-8') # Amostra de 500 caracteres
 
     elif formato == "csv":
         df = pd.read_csv(io.BytesIO(content))
         conteudo = df.head().to_json(orient="records")  # Primeiras linhas como amostra
 
     elif formato == "json":
-        conteudo = json.dumps(json.loads(content.decode('utf-8'))[:5])  # Amostra dos 5 primeiros itens
+        conteudo = json.dumps(json.loads(content.decode('utf-8')))  # Amostra dos 5 primeiros itens
 
     elif formato == "txt":
-        conteudo = content.decode('utf-8')[:500]  # Amostra de 500 caracteres
+        conteudo = content.decode('utf-8')  # Amostra de 500 caracteres
 
     else:
         raise HTTPException(status_code=400, detail="Formato de arquivo não suportado.")
