@@ -1,8 +1,6 @@
-from typing import Generator
+from bson import ObjectId
 from fastapi import FastAPI, HTTPException, File, UploadFile, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pymongo import MongoClient
-from pymongo.collection import Collection
 from datetime import datetime
 import google.generativeai as genai
 import xml.etree.ElementTree as ET
@@ -11,6 +9,10 @@ import json
 import io
 from contextlib import contextmanager
 import uvicorn  # Importando o Uvicorn
+from motor.motor_asyncio import AsyncIOMotorClient
+from typing import AsyncGenerator
+import bson.json_util as json_util
+
 
 # Configuração do FastAPI
 app = FastAPI()
@@ -22,31 +24,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Criação do gerenciador de contexto para o MongoDB
-@contextmanager
-def get_mongo_client(uri: str = "mongodb://localhost:27017/") -> Generator[MongoClient, None, None]:
-    client = MongoClient(uri)
-    try:
-        yield client
-    except Exception as e:
-        print(f"Erro ao conectar com o MongoDB: {e}")
-        raise
-    finally:
-        client.close()  # Garante que a conexão seja fechada após o uso
+client: AsyncIOMotorClient = None
 
-# Função para obter a coleção
-def get_collection(client: MongoClient, db_name: str, collection_name: str) -> Collection:
-    return client[db_name][collection_name]
+@app.on_event("startup")
+async def startup_db():
+    global client
+    client = AsyncIOMotorClient("mongodb://localhost:27017")
+    print("MongoDB connected!")
 
-# Exemplo de uso
-with get_mongo_client() as client:
-    collection = get_collection(client, "APIGemini", "arquivos")
-    # Agora você pode usar a coleção, por exemplo:
-    documento = collection.find_one()
-    print(documento)
+@app.on_event("shutdown")
+async def shutdown_db():
+    global client
+    if client:
+        client.close()
+        print("MongoDB connection closed!")
 
 # Configuração da API Gemini
-genai.configure(api_key="SUA_CHAVE_API")
+genai.configure(api_key="AIzaSyDQ0qwyrZYbir297YmjI6031YVO_NBAzp4")
+
+def json_converter(obj):
+        return str(obj)
+
+# Função para gerar um JSON "pretty" sem barras invertidas ou caracteres especiais
+def json_pretty_clean(obj):
+    # Gera o JSON "pretty" com indentação
+    json_str = json.dumps(obj, default=json_converter, indent=2)
+    
+    json_str = json_str.replace('\\\"', '"')  # Remove todas as barras invertidas (escape)
+    # Remove as barras invertidas (escape) que podem aparecer em strings
+    return json_str
 
 # Função para extrair metadados do arquivo
 async def extract_metadata(file: UploadFile):
@@ -89,7 +95,7 @@ async def process_file(file: UploadFile):
 
 # Função para enviar os metadados e amostra para a API do Gemini
 async def send_to_gemini(metadados, amostra):
-    prompt = f"Analise os seguintes metadados e conteúdo de amostra de um arquivo:\nMetadados: {metadados}\nAmostra: {amostra}\nEntregue um resumo em formato JSON:"
+    prompt = f"Analise os seguintes metadados e conteúdo de amostra de um arquivo:\nMetadados: {metadados}\nAmostra: {amostra}\nEntregue um resumo em formato JSON:\nResponda somente com o JSON e não adicione nenhuma quebra de linha a resposta."
     response = genai.GenerativeModel("gemini-1.5-flash")
     result = response.generate_content([prompt])
 
@@ -97,7 +103,7 @@ async def send_to_gemini(metadados, amostra):
 
 # Endpoint para upload de arquivo
 @app.post("/upload-file/")
-async def upload_file(file: UploadFile = File(...), client: MongoClient = Depends(get_mongo_client)):
+async def upload_file(file: UploadFile = File(...)):
     try:
         # Verificar o tipo do arquivo
         if not file.content_type in ['text/xml', 'text/csv', 'application/json', 'text/plain']:
@@ -114,20 +120,21 @@ async def upload_file(file: UploadFile = File(...), client: MongoClient = Depend
         # Enviar metadados e amostra para a API do Gemini
         resumo_gemini = await send_to_gemini(metadados, amostra_conteudo)
 
+        a = json.loads(resumo_gemini)
+
         # Criar o JSON de resposta
         resposta = {
             "metadados": metadados,
-            "resumoGemini": resumo_gemini
+            "resumoGemini": a
         }
 
-        # Obter a coleção do MongoDB usando a dependência
-        collection = get_collection(client)
+        x = resposta
 
-        # Salvar no MongoDB
-        collection.insert_one(resposta)
-
-        # Retornar a resposta para o frontend
-        return resposta
+        db = client["APIGemini"]
+        await db["arquivos"].insert_one(x)
+        
+        y = (json_util.dumps(resposta, sort_keys=True, indent=4))
+        return y
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao processar o upload: {str(e)}")
