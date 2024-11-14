@@ -40,7 +40,7 @@ async def shutdown_db():
         print("MongoDB connection closed!")
 
 # Configuração da API Gemini
-genai.configure(api_key="AIzaSyDQ0qwyrZYbir297YmjI6031YVO_NBAzp4")
+genai.configure(api_key="CHAVE_DA_API")
 
 def json_converter(obj):
         return str(obj)
