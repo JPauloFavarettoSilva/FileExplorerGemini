@@ -1,5 +1,5 @@
 from typing import Generator
-from fastapi import FastAPI, HTTPException, File, UploadFile, Depends
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 from pymongo.collection import Collection
@@ -10,7 +10,7 @@ import pandas as pd
 import json
 import io
 from contextlib import contextmanager
-import uvicorn  # Importando o Uvicorn
+import uvicorn
 
 # Configuração do FastAPI
 app = FastAPI()
@@ -38,13 +38,6 @@ def get_mongo_client(uri: str = "mongodb://localhost:27017/") -> Generator[Mongo
 def get_collection(client: MongoClient, db_name: str, collection_name: str) -> Collection:
     return client[db_name][collection_name]
 
-# Exemplo de uso
-with get_mongo_client() as client:
-    collection = get_collection(client, "APIGemini", "arquivos")
-    # Agora você pode usar a coleção, por exemplo:
-    documento = collection.find_one()
-    print(documento)
-
 # Configuração da API Gemini
 genai.configure(api_key="SUA_CHAVE_API")
 
@@ -70,17 +63,17 @@ async def process_file(file: UploadFile):
 
     if formato == "xml":
         root = ET.fromstring(content)
-        conteudo = ET.tostring(root, encoding='utf-8').decode('utf-8') # Amostra de 500 caracteres
+        conteudo = ET.tostring(root, encoding='utf-8').decode('utf-8')
 
     elif formato == "csv":
         df = pd.read_csv(io.BytesIO(content))
-        conteudo = df.head().to_json(orient="records")  # Primeiras linhas como amostra
+        conteudo = df.head().to_json(orient="records")
 
     elif formato == "json":
-        conteudo = json.dumps(json.loads(content.decode('utf-8')))  # Amostra dos 5 primeiros itens
+        conteudo = json.dumps(json.loads(content.decode('utf-8')))
 
     elif formato == "txt":
-        conteudo = content.decode('utf-8')  # Amostra de 500 caracteres
+        conteudo = content.decode('utf-8')
 
     else:
         raise HTTPException(status_code=400, detail="Formato de arquivo não suportado.")
@@ -97,15 +90,16 @@ async def send_to_gemini(metadados, amostra):
 
 # Endpoint para upload de arquivo
 @app.post("/upload-file/")
-async def upload_file(file: UploadFile = File(...), client: MongoClient = Depends(get_mongo_client)):
+async def upload_file(file: UploadFile = File(...)):
     try:
         # Verificar o tipo do arquivo
-        if not file.content_type in ['text/xml', 'text/csv', 'application/json', 'text/plain']:
+        if file.content_type not in ['text/xml', 'text/csv', 'application/json', 'text/plain']:
             raise HTTPException(status_code=400, detail="Tipo de arquivo não suportado.")
 
         # Extrair metadados
         metadados = await extract_metadata(file)
 
+        # Resetar o ponteiro do arquivo para o início
         await file.seek(0)
 
         # Processar o conteúdo do arquivo (amostra)
@@ -120,18 +114,18 @@ async def upload_file(file: UploadFile = File(...), client: MongoClient = Depend
             "resumoGemini": resumo_gemini
         }
 
-        # Obter a coleção do MongoDB usando a dependência
-        collection = get_collection(client)
+        # Usar o gerenciador de contexto para obter o cliente e a coleção
+        with get_mongo_client() as client:
+            collection = get_collection(client, "APIGemini", "arquivos")
 
-        # Salvar no MongoDB
-        collection.insert_one(resposta)
+            # Salvar no MongoDB
+            collection.insert_one(resposta)
 
         # Retornar a resposta para o frontend
         return resposta
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao processar o upload: {str(e)}")
-
 
 # Rodar o servidor com Uvicorn diretamente
 if __name__ == "__main__":
